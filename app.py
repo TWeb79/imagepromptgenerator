@@ -30,6 +30,7 @@ import requests
 PROMPTS_FILE: str = "generated_prompts.json"
 OLLAMA_URL: str = "http://127.0.0.1:11434"
 SD_API_URL: str = "http://127.0.0.1:8141"  # Stable Diffusion API (SDAPI)
+SD_API_MODEL: str = "/Users/torstenweber/dev/ai/external/_Models/Stable-diffusion/dreamshaperXL_lightningDPMSDE.safetensors"
 OLLAMA_MODEL: str = "llama2-uncensored:7b"
 OLLAMA_TEST_TIMEOUT: int = 10
 OLLAMA_GENERATE_TIMEOUT: int = 120
@@ -153,13 +154,43 @@ class LocalStableDiffusionService:
     Requires SDAPI running on the specified URL (default: http://127.0.0.1:8141).
     """
     
-    def __init__(self, url: str = SD_API_URL) -> None:
+    def __init__(self, url: str = SD_API_URL, model_path: Optional[str] = None) -> None:
         """Initialize local SD service.
         
         Args:
             url: Base URL of the SDAPI server.
+            model_path: Optional model path to load before generation.
         """
         self.url: str = url
+        self.model_path: Optional[str] = model_path
+        self._model_loaded: bool = False
+    
+    def _load_model(self) -> bool:
+        """Load the specified model into SDAPI.
+        
+        Returns:
+            True if model loaded successfully, False otherwise.
+        """
+        if not self.model_path:
+            return True
+        
+        try:
+            response = requests.post(
+                f"{self.url}/load-model",
+                json={"model_path": self.model_path},
+                timeout=SD_API_TIMEOUT,
+            )
+            if response.status_code == 200:
+                data: Dict = response.json()
+                print(f"Model loaded: {data.get('model', self.model_path)}")
+                self._model_loaded = True
+                return True
+            else:
+                print(f"Failed to load model: {response.text}")
+                return False
+        except requests.exceptions.RequestException as e:
+            print(f"Failed to load model: {e}")
+            return False
     
     def generate(self, prompt: str, steps: int) -> Optional[str]:
         """Generate image from prompt using local SDAPI.
@@ -171,6 +202,10 @@ class LocalStableDiffusionService:
         Returns:
             Base64-encoded PNG image data, or None on failure.
         """
+        if self.model_path and not self._model_loaded:
+            if not self._load_model():
+                return None
+        
         params: Dict[str, str | int] = {
             "prompt": prompt,
             "steps": steps,
@@ -478,6 +513,7 @@ def create_service(
     service_type: str,
     api_key: Optional[str] = None,
     url: str = SD_API_URL,
+    model_path: Optional[str] = SD_API_MODEL,
 ) -> ImageGenerationService:
     """Factory function to create an image generation service.
     
@@ -485,6 +521,7 @@ def create_service(
         service_type: Type of service ("local" or "modelslab").
         api_key: API key for online services (required for modelslab).
         url: URL for local SDAPI server (default: http://127.0.0.1:8141).
+        model_path: Model path for local SDAPI (default: SD_API_MODEL constant).
     
     Returns:
         An ImageGenerationService instance.
@@ -493,7 +530,7 @@ def create_service(
         ValueError: If service_type is unknown or api_key is missing.
     """
     if service_type == "local":
-        return LocalStableDiffusionService(url)
+        return LocalStableDiffusionService(url, model_path)
     elif service_type == "modelslab":
         if not api_key:
             raise ValueError(

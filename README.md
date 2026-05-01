@@ -21,7 +21,7 @@ For detailed system architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 The system consists of three main components:
 1. **Prompt Generator** (Ollama + LLM) — Creates Instagram-style prompts
-2. **Image Generator** (Stable Diffusion) — Synthesizes images from prompts
+2. **Image Generator** (SDAPI) — Synthesizes images from prompts
 3. **Output Manager** — Saves images and manages prompts
 
 ## Requirements
@@ -33,7 +33,8 @@ The system consists of three main components:
   - Model: `llama2-uncensored:7b` (or compatible)
   - Used only for prompt generation
 - **One** of the following for image generation:
-  - **Stable Diffusion Web UI** running locally (port 7860) **OR**
+  - **SDAPI** running locally (port 8141) https://github.com/TWeb79/stablediffusionprovider
+  **OR**. 
   - **ModelsLab API key** for online generation (no local installation needed)
 
 ### Python Dependencies
@@ -44,7 +45,7 @@ pip install requests
 
 ## Installation
 
-### Option 1: Local Stable Diffusion (Full Installation)
+### Option 1: Local SDAPI (Full Installation)
 
 #### Setup Ollama
 
@@ -54,11 +55,9 @@ ollama serve
 ollama run llama2-uncensored
 ```
 
-#### Setup Stable Diffusion Web UI
+#### Setup SDAPI
 
-Follow the official guide: https://github.com/AUTOMATIC1111/stable-diffusion-webui
-
-Ensure it's running with API enabled on port 7860.
+Run SDAPI with Stable Diffusion models on port 8141. See [SDAPI.md](SDAPI.md) for setup details.
 
 Then install the Python dependency:
 
@@ -98,7 +97,7 @@ No local installation required! Just get a free API key.
 
 ### Local Mode (Default)
 
-Uses local Stable Diffusion Web UI on port 7860:
+Uses local SDAPI on port 8141:
 
 ```bash
 python3 app.py "coffee"
@@ -162,7 +161,7 @@ python3 app.py "food" --online -o my_online_images -s 30
 #### Switching Between Modes
 
 ```bash
-# If local SD WebUI is running
+# If local SDAPI is running
 python3 app.py "fashion"                    # Uses local
 
 # If local installation is not available
@@ -179,9 +178,9 @@ python3 app.py "fitness" --service modelslab  # Force online
 
 The application supports two image generation backends:
 
-1. **Local Stable Diffusion Web UI**
-   - Runs on localhost:7860
-   - Requires full SD installation
+1. **Local SDAPI**
+   - Runs on localhost:8141
+   - Requires full SD installation via SDAPI
    - Free (aside from compute resources)
    - No network calls outside localhost
    - Best for frequent use with powerful GPU
@@ -198,11 +197,11 @@ The application supports two image generation backends:
 ```
 User Input → CLI Parsing → Service Selection
     │
-    ├─[Local Mode]→ Ollama (prompt) → SD WebUI (image)
+    ├─[Local Mode]→ Ollama (prompt) → SDAPI (image)
     │
     └─[Online Mode]→ Ollama (prompt) → ModelsLab API (image)
-                            │
-                            └─[Fallback]→ Built-in template
+                        │
+                        └─[Fallback]→ Built-in template
     │
     └─→ Output: PNG image + saved prompt (JSON)
 ```
@@ -236,7 +235,7 @@ Both modes use the same prompt generation process:
 
 | Feature | Local Mode | Online Mode |
 |---------|-----------|-------------|
-| **Installation** | Requires SD WebUI | No installation |
+| **Installation** | Requires SDAPI | No installation |
 | **Speed** | Depends on GPU (typically fast) | Network dependent (~10-30s) |
 | **Cost** | Free (compute only) | Free (ModelsLab) |
 | **Privacy** | 100% local | Prompts sent to API |
@@ -258,15 +257,15 @@ ollama serve
 curl http://127.0.0.1:11434/api/tags  # Verify
 ```
 
-### Local Mode: Stable Diffusion Connection Error
+### Local Mode: SDAPI Connection Error
 
 ```bash
-Request to stable diffusion API failed: Connection refused
+Request to SDAPI failed: Connection refused
 ```
 
 **Solution:**
-1. Ensure SD Web UI is running on port 7860
-2. Check API is enabled in Web UI settings
+1. Ensure SDAPI is running on port 8141
+2. Check your model directory is mounted/volumed correctly
 3. Try: `python3 app.py topic --online` instead
 
 ### Online Mode: API Key Error
@@ -308,9 +307,8 @@ python3 app.py "coffee" --online
 
 ### If You Want to Go Local
 
-1. Install Stable Diffusion Web UI
-2. Start it on port 7860
-3. Run without `--online` flag
+1. Setup SDAPI on port 8141
+2. Run without `--online` flag
 
 ### Best Practice
 
@@ -345,12 +343,12 @@ python3 app.py "test" -s 1 --service local
 - **Format**: JSON with prompt, steps, dimensions
 - **Response**: Base64-encoded PNG (same format as local SD)
 
-### Local Stable Diffusion API
+### Local SDAPI
 
-- **Endpoint**: `POST http://127.0.0.1:7860/sdapi/v1/txt2img`
+- **Endpoint**: `GET http://127.0.0.1:8141/generate`
 - **Auth**: None (local only)
-- **Format**: JSON with prompt, steps
-- **Response**: Base64-encoded PNG
+- **Format**: Query parameters with prompt, steps
+- **Response**: PNG binary (code converts to base64)
 
 ## Architecture
 

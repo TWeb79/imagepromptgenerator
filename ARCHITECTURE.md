@@ -5,7 +5,7 @@
 The Instagram Photo Generator is a Python CLI tool that generates Instagram-worthy photos based on user-provided topics. It combines LLM-powered prompt generation (via Ollama) with AI image synthesis (via Stable Diffusion) following a clean, three-tier architecture.
 
 The system supports **two image generation modes**:
-1. **Local Mode** — Uses a local Stable Diffusion Web UI installation
+1. **Local Mode** — Uses SDAPI (Stable Diffusion API)
 2. **Online Mode** — Uses the ModelsLab cloud API (no local installation required)
 
 ## System Architecture
@@ -41,7 +41,7 @@ The system supports **two image generation modes**:
 │                         │    │                             │
 │  get_instagram_prompt() │    │    generate_image()         │
 │                         │    │                             │
-│  - Connects to Ollama   │    │  - Local SD WebUI or        │
+│  - Connects to Ollama   │    │  - Local SDAPI or        │
 │  - Sends topic          │    │    Online ModelsLab API     │
 │  - Receives prompt      │    │  - Sends prompt & steps     │
 │                         │    │  - Receives image (base64)  │
@@ -51,17 +51,16 @@ The system supports **two image generation modes**:
                │                               │
    ┌───────────┴───────────┐    ┌──────────────┴───────────────┐
    ▼                       ▼    ▼                               ▼
-┌─────────────────┐    ┌─────────────────┐         ┌─────────────────────┐
-│     Ollama      │    │ Local SD WebUI  │         │  ModelsLab Online   │
-│   (localhost)   │    │   (localhost)   │         │      API            │
-│                 │    │                 │         │                     │
-│  Model:         │    │  Endpoint:      │         │  Endpoint:          │
-│  llama2-uncensored│   │  /sdapi/v1/     │         │  modelslab.com/     │
-│  Timeout: 120s  │    │    txt2img      │         │    api/v6/          │
-│                 │    │  Timeout: 120s  │         │  Timeout: 120s      │
-└─────────────────┘    └─────────────────┘         └─────────────────────┘
-               │                       │                         │
-               ▼                       ▼                         ▼
+┌─────────────────────────┐    ┌─────────────────────────────┐    ┌─────────────────────┐
+│       Ollama            │    │          SDAPI               │    │  ModelsLab Online   │
+│       (localhost)       │    │        (localhost)           │    │      API            │
+│                         │    │                              │    │                     │
+│  Model:                 │    │  Endpoint:                   │    │  Endpoint:          │
+│  llama2-uncensored      │    │  /generate                   │    │  modelslab.com/     │
+│  Timeout: 120s          │    │  Timeout: 120s               │    │  Timeout: 120s      │
+└─────────────────────────┘    └─────────────────────────────┘    └─────────────────────┘
+                │                       │                         │
+                ▼                       ▼                         ▼
 ┌─────────────────────────┐    ┌─────────────────────────────┐
 │     Generated Prompt    │    │    Base64 Image Data        │
 │    (Instagram-style)    │    │                             │
@@ -99,12 +98,11 @@ The system supports **two image generation modes**:
 
 The system supports two interchangeable image generation services:
 
-### 1. Local Stable Diffusion Web UI
-- **URL**: `http://127.0.0.1:7860/sdapi/v1/txt2img`
+### 1. Local SDAPI
+- **URL**: `http://127.0.0.1:8141/generate`
 - **Mode**: Local (requires installation)
 - **Requirements**: 
-  - Automatic1111 Stable Diffusion Web UI running
-  - API enabled in Web UI settings
+  - SDAPI running with Stable Diffusion models
   - GPU recommended but not required
 - **Pros**: Free, private, no network calls, unlimited generations
 - **Cons**: Requires installation and setup, needs GPU for speed
@@ -129,7 +127,7 @@ class ImageGenerationService(Protocol):
         ...
 
 class LocalStableDiffusionService(ImageGenerationService):
-    # Uses local SD Web UI
+    # Uses SDAPI
     ...
 
 class ModelsLabOnlineService(ImageGenerationService):
@@ -143,7 +141,7 @@ The application uses a factory pattern to create the appropriate service:
 def create_service(
     service_type: str,
     api_key: Optional[str] = None,
-    url: str = SD_WEBUI_URL
+    url: str = SD_API_URL
 ) -> ImageGenerationService:
     if service_type == "local":
         return LocalStableDiffusionService(url)
@@ -207,9 +205,9 @@ The entry point provides command-line interface functionality.
 ### 3. Image Generation Services
 
 #### LocalStableDiffusionService
-- POSTs to `/sdapi/v1/txt2img`
-- Request: `{"prompt": str, "steps": int}`
-- Response: `{"images": ["base64_data"]}`
+- GETs to `/generate`
+- Request: `{"prompt": str, "steps": int}` (query params)
+- Response: PNG binary
 - Timeout: 120 seconds
 
 #### ModelsLabOnlineService
@@ -228,9 +226,9 @@ The entry point provides command-line interface functionality.
 - **Timeout**: 10s (test), 120s (generation)
 - **Status**: Required for creative prompts (fallback available)
 
-#### Stable Diffusion Web UI (Port 7860)
+#### SDAPI (Port 8141)
 - **Purpose**: Local image generation
-- **Endpoint**: `POST /sdapi/v1/txt2img`
+- **Endpoint**: `GET /generate`
 - **Timeout**: 120 seconds
 - **Status**: Required for local mode
 
@@ -313,7 +311,7 @@ User Input
 |-------|-----------|-------------|---------------|
 | Empty topic | Exit(1) | Exit(1) | "Error: Topic cannot be empty" |
 | Ollama unavailable | Fallback prompt | Fallback prompt | "Using fallback Instagram prompt" |
-| SD WebUI unavailable | Exit(1) | N/A | "Failed: local service" + suggest online |
+| SDAPI unavailable | Exit(1) | N/A | "Failed: local service" + suggest online |
 | Invalid API key | N/A | Exit(1) | "Error: Invalid API key" |
 | Rate limited | N/A | Exit(1) | "Error: Rate limited" |
 | No internet | OK | Exit(1) | "Could not connect" + suggest offline |
@@ -368,7 +366,7 @@ User Input
 | `requests` | HTTP client | Yes | 2.33+ |
 | Python | Runtime | Yes | 3.8+ |
 | Ollama | Prompt generation | External | Any |
-| SD WebUI | Local generation | Optional | Any |
+| SDAPI | Local image generation | Optional | Any |
 | ModelsLab API | Online generation | Optional | Free tier |
 
 ## Security Considerations

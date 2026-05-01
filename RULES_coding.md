@@ -94,7 +94,7 @@ def load_prompts() -> Dict[str, List[str]]:
 ```python
 # Good
 OLLAMA_URL = "http://127.0.0.1:11434"
-SD_WEBUI_URL = "http://127.0.0.1:7860"
+SD_API_URL = "http://127.0.0.1:8141"
 DEFAULT_STEPS = 20
 PROMPT_TIMEOUT = 120
 

@@ -1,0 +1,189 @@
+# ============================================
+# Byte-compiled / optimized / DLL files
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# ============================================
+# Distribution / packaging
+# ============================================
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ============================================
+# PyInstaller
+# ============================================
+*.manifest
+*.spec
+
+# ============================================
+# Installer logs
+# ============================================
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ============================================
+# Unit test / coverage reports
+# ============================================
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# ============================================
+# Translations
+# ============================================
+*.mo
+*.pot
+
+# ============================================
+# Environments (virtualenv, conda, etc.)
+# ============================================
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Python-specific virtual environment
+venv/
+.venv/
+
+# ============================================
+# IDE and Editor files
+# ============================================
+# VS Code
+.vscode/
+.idea/
+
+# Vim
+*.swp
+*.swo
+*~
+
+# ============================================
+# macOS
+# ============================================
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Trashes
+
+# Thumbnails
+._*
+
+# Files that might appear on external disk
+.Spotlight-V100
+
+# ============================================
+# Generated output files
+# ============================================
+# Generated images
+**/generated_images/*.png
+**/generated_images/*.jpg
+**/generated_images/*.jpeg
+**/generated_images/*.webp
+
+# Generated prompts and data
+generated_prompts.json
+
+# ============================================
+# Logs
+# ============================================
+*.log
+
+# ============================================
+# Configuration (local overrides)
+# ============================================
+config.json
+settings.json
+*.local.json
+
+# ============================================
+# Development / Temporary files
+# ============================================
+*.tmp
+*.temp
+*.bak
+*.backup
+.cache/
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+
+# ============================================
+# OS files
+# ============================================
+Thumbs.db
+.DS_Store
+
+# ============================================
+# IDE workspace settings
+# ============================================
+.idea/
+*.iml
+
+# ============================================
+# Jupyter Notebook
+# ============================================
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ============================================
+# Poetry / Pipenv / uv
+# ============================================
+poetry.lock
+Pipfile.lock
+
+# ============================================
+# Ruff / Linter cache
+# ============================================
+.ruff_cache/
+
+# ============================================
+# Coverage reports
+# ============================================
+.coverage
+.coverage.*
+htmlcov/
+
+# ============================================
+# Pyright / Type checking
+# ============================================
+pyrightconfig.json
+
+# ============================================
+# Python cache
+# ============================================
+*.pyc
+__pycache__/

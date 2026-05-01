@@ -7,7 +7,7 @@ Diffusion).
 
 External Dependencies:
     - Ollama running on localhost:11434 (for prompt generation)
-    - Stable Diffusion Web UI on localhost:7860 (for local image generation), OR
+    - SDAPI (Stable Diffusion API) on localhost:8141 (for local image generation), OR
     - ModelsLab API key (for online image generation without local installation)
 
 Usage:
@@ -29,7 +29,7 @@ import requests
 # ============================
 PROMPTS_FILE: str = "generated_prompts.json"
 OLLAMA_URL: str = "http://127.0.0.1:11434"
-SD_WEBUI_URL: str = "http://127.0.0.1:7860"
+SD_API_URL: str = "http://127.0.0.1:8141"  # Stable Diffusion API (SDAPI)
 OLLAMA_MODEL: str = "llama2-uncensored:7b"
 OLLAMA_TEST_TIMEOUT: int = 10
 OLLAMA_GENERATE_TIMEOUT: int = 120
@@ -147,58 +147,62 @@ class ImageGenerationService(Protocol):
 
 
 class LocalStableDiffusionService:
-    """Image generation using local Stable Diffusion Web UI.
+    """Image generation using local Stable Diffusion API (SDAPI).
     
-    Connects to a local Stable Diffusion Web UI instance via its REST API.
-    Requires SD Web UI running on the specified URL.
+    Connects to a local SDAPI instance via its REST API.
+    Requires SDAPI running on the specified URL (default: http://127.0.0.1:8141).
     """
     
-    def __init__(self, url: str = SD_WEBUI_URL) -> None:
+    def __init__(self, url: str = SD_API_URL) -> None:
         """Initialize local SD service.
         
         Args:
-            url: Base URL of the Stable Diffusion Web UI API.
+            url: Base URL of the SDAPI server.
         """
         self.url: str = url
     
     def generate(self, prompt: str, steps: int) -> Optional[str]:
-        """Generate image from prompt using local Stable Diffusion.
+        """Generate image from prompt using local SDAPI.
         
         Args:
             prompt: The image generation prompt.
-            steps: Number of diffusion steps (1-100).
+            steps: Number of inference steps (1-150).
         
         Returns:
             Base64-encoded PNG image data, or None on failure.
         """
-        payload: Dict[str, str | int] = {
+        params: Dict[str, str | int] = {
             "prompt": prompt,
             "steps": steps,
         }
         
         try:
-            response = requests.post(
-                f"{self.url}/sdapi/v1/txt2img",
-                json=payload,
+            response = requests.get(
+                f"{self.url}/generate",
+                params=params,
                 timeout=SD_API_TIMEOUT,
             )
             response.raise_for_status()
             
-            data: Dict = response.json()
-            images: List[str] = data.get("images", [])
+            # SDAPI returns PNG binary directly
+            # Convert to base64 for consistent handling with other services
+            image_base64: str = base64.b64encode(response.content).decode('utf-8')
             
-            if not images:
-                print("No images returned from Stable Diffusion API")
-                return None
+            # Log generation time if available
+            gen_time: Optional[str] = response.headers.get('X-Generation-Time-Ms')
+            if gen_time:
+                print(f"Generation time: {gen_time}ms")
             
-            return images[0]
+            model: Optional[str] = response.headers.get('X-Model')
+            if model:
+                print(f"Model used: {model}")
+            
+            return image_base64
             
         except requests.exceptions.RequestException as e:
-            print(f"Request to Stable Diffusion API failed: {e}")
-        except (KeyError, IndexError) as e:
-            print(f"Unexpected response format from API: {e}")
-        except json.JSONDecodeError as e:
-            print(f"Invalid JSON response: {e}")
+            print(f"Request to SDAPI failed: {e}")
+        except (ValueError, OSError) as e:
+            print(f"Failed to encode image data: {e}")
         
         return None
 
@@ -473,14 +477,14 @@ def get_instagram_prompt(topic: str) -> str:
 def create_service(
     service_type: str,
     api_key: Optional[str] = None,
-    url: str = SD_WEBUI_URL,
+    url: str = SD_API_URL,
 ) -> ImageGenerationService:
     """Factory function to create an image generation service.
     
     Args:
         service_type: Type of service ("local" or "modelslab").
         api_key: API key for online services (required for modelslab).
-        url: URL for local Stable Diffusion Web UI.
+        url: URL for local SDAPI server (default: http://127.0.0.1:8141).
     
     Returns:
         An ImageGenerationService instance.

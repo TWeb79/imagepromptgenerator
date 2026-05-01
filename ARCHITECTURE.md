@@ -2,7 +2,11 @@
 
 ## Overview
 
-The Instagram Photo Generator is a Python CLI tool that generates Instagram-worthy photos based on user-provided topics. It combines LLM-powered prompt generation (via Ollama) with AI image synthesis (via Stable Diffusion Web UI) following a clean, three-tier architecture.
+The Instagram Photo Generator is a Python CLI tool that generates Instagram-worthy photos based on user-provided topics. It combines LLM-powered prompt generation (via Ollama) with AI image synthesis (via Stable Diffusion) following a clean, three-tier architecture.
+
+The system supports **two image generation modes**:
+1. **Local Mode** — Uses a local Stable Diffusion Web UI installation
+2. **Online Mode** — Uses the ModelsLab cloud API (no local installation required)
 
 ## System Architecture
 
@@ -18,7 +22,7 @@ The Instagram Photo Generator is a Python CLI tool that generates Instagram-wort
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │                    Argument Parser                         │   │
 │  │  - Validates topic, output folder, steps                    │   │
-│  │  - Handles CLI flags (-o, -s, --help)                      │   │
+│  │  - Handles CLI flags (-o, -s, --online, --service)         │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                                                                     │
 │  ┌─────────────────────────────────────────────────────────────┐   │
@@ -37,24 +41,29 @@ The Instagram Photo Generator is a Python CLI tool that generates Instagram-wort
 │                         │    │                             │
 │  get_instagram_prompt() │    │    generate_image()         │
 │                         │    │                             │
-│  - Connects to Ollama   │    │  - Connects to SD WebUI     │
-│  - Sends topic          │    │  - Sends prompt & steps     │
-│  - Receives prompt      │    │  - Receives image (base64)  │
-│                         │    │                             │
+│  - Connects to Ollama   │    │  - Local SD WebUI or        │
+│  - Sends topic          │    │    Online ModelsLab API     │
+│  - Receives prompt      │    │  - Sends prompt & steps     │
+│                         │    │  - Receives image (base64)  │
 └─────────────────────────┘    └─────────────────────────────┘
                │                               │
-               ▼                               ▼
-┌─────────────────────────┐    ┌─────────────────────────────┐
-│      Ollama API         │    │  Stable Diffusion API        │
-│   (localhost:11434)     │    │     (localhost:7860)         │
-│                         │    │                             │
-│  Model: llama2-uncensored│   │  Endpoint: /sdapi/v1/txt2img │
-│  Timeout: 120s          │    │  Timeout: 120s               │
-└─────────────────────────┘    └─────────────────────────────┘
                │                               │
-               ▼                               ▼
+               │                               │
+   ┌───────────┴───────────┐    ┌──────────────┴───────────────┐
+   ▼                       ▼    ▼                               ▼
+┌─────────────────┐    ┌─────────────────┐         ┌─────────────────────┐
+│     Ollama      │    │ Local SD WebUI  │         │  ModelsLab Online   │
+│   (localhost)   │    │   (localhost)   │         │      API            │
+│                 │    │                 │         │                     │
+│  Model:         │    │  Endpoint:      │         │  Endpoint:          │
+│  llama2-uncensored│   │  /sdapi/v1/     │         │  modelslab.com/     │
+│  Timeout: 120s  │    │    txt2img      │         │    api/v6/          │
+│                 │    │  Timeout: 120s  │         │  Timeout: 120s      │
+└─────────────────┘    └─────────────────┘         └─────────────────────┘
+               │                       │                         │
+               ▼                       ▼                         ▼
 ┌─────────────────────────┐    ┌─────────────────────────────┐
-│     Generated Prompt    │    │      Base64 Image Data       │
+│     Generated Prompt    │    │    Base64 Image Data        │
 │    (Instagram-style)    │    │                             │
 └─────────────────────────┘    └─────────────────────────────┘
                │                               │
@@ -86,6 +95,62 @@ The Instagram Photo Generator is a Python CLI tool that generates Instagram-wort
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+## Image Generation Services
+
+The system supports two interchangeable image generation services:
+
+### 1. Local Stable Diffusion Web UI
+- **URL**: `http://127.0.0.1:7860/sdapi/v1/txt2img`
+- **Mode**: Local (requires installation)
+- **Requirements**: 
+  - Automatic1111 Stable Diffusion Web UI running
+  - API enabled in Web UI settings
+  - GPU recommended but not required
+- **Pros**: Free, private, no network calls, unlimited generations
+- **Cons**: Requires installation and setup, needs GPU for speed
+- **CLI**: `--service local` (default) or `--service modelslab` to switch
+
+### 2. ModelsLab Online API
+- **URL**: `https://modelslab.com/api/v6/images/text2img`
+- **Mode**: Cloud-based
+- **Requirements**:
+  - Free API key from https://modelslab.com/
+  - Internet connection
+  - API key set via `--api-key` or `SD_API_KEY` environment variable
+- **Pros**: No installation, works anywhere, free API key
+- **Cons**: Requires internet, rate limits, prompts sent to third-party
+- **CLI**: `--online` flag or `--service modelslab --api-key YOUR_KEY`
+
+## Service Abstraction
+
+```python
+class ImageGenerationService(Protocol):
+    def generate(self, prompt: str, steps: int) -> Optional[str]:
+        ...
+
+class LocalStableDiffusionService(ImageGenerationService):
+    # Uses local SD Web UI
+    ...
+
+class ModelsLabOnlineService(ImageGenerationService):
+    # Uses ModelsLab cloud API
+    ...
+```
+
+The application uses a factory pattern to create the appropriate service:
+
+```python
+def create_service(
+    service_type: str,
+    api_key: Optional[str] = None,
+    url: str = SD_WEBUI_URL
+) -> ImageGenerationService:
+    if service_type == "local":
+        return LocalStableDiffusionService(url)
+    elif service_type == "modelslab":
+        return ModelsLabOnlineService(api_key)
+```
+
 ## Components
 
 ### 1. CLI Layer (app.py)
@@ -93,110 +158,166 @@ The Instagram Photo Generator is a Python CLI tool that generates Instagram-wort
 The entry point provides command-line interface functionality.
 
 **Responsibilities:**
-- Command-line argument parsing
-- Input validation
+- Command-line argument parsing (`parse_arguments()`)
+- Service selection and creation (`create_service()`)
 - Workflow orchestration
 - Error handling and user feedback
 
 **Key Functions:**
 
-#### `main()` / `if __name__ == "__main__"`
-- **Input**: Command-line arguments
-- **Process**: 
-  - Parses topic, output folder, steps
-  - Orchestrates prompt generation, image creation, output
-- **Output**: Success/failure with user feedback
+#### `parse_arguments() -> argparse.Namespace`
+- **Purpose**: Parse CLI arguments
+- **Args**: `--topic`, `-o/--output`, `-s/--steps`, `--online`, `--api-key`, `--service`
+- **Returns**: Parsed arguments namespace
 
-#### `get_instagram_prompt(topic: str) -> str`
-- **Input**: Topic string (e.g., "coffee", "travel")
-- **Process**: 
-  - Tests Ollama connectivity with simple probe
-  - Requests Instagram-style prompt from LLM
-  - Falls back to built-in template on failure
-- **Output**: Instagram-ready prompt string
+#### `create_service(service_type, api_key, url) -> ImageGenerationService`
+- **Purpose**: Factory function to instantiate the appropriate service
+- **Types**: `"local"` or `"modelslab"`
+- **Returns**: Service instance implementing `ImageGenerationService`
 
-#### `generate_image(prompt: str, url: str, steps: int) -> Optional[str]`
-- **Input**: 
-  - `prompt`: Generated Instagram prompt
-  - `url`: Stable Diffusion API endpoint
-  - `steps`: Diffusion iterations
-- **Process**: 
-  - POSTs to `/sdapi/v1/txt2img`
-  - Validates and extracts base64 image
-- **Output**: Base64-encoded PNG data or `None`
+#### `get_api_key(cli_key) -> Optional[str]`
+- **Purpose**: Get API key from CLI, environment, or config file
+- **Priority**: CLI > `SD_API_KEY` env var > `config.json`
 
-#### `save_image(image_data: str, filename: str, folder: str) -> None`
-- **Input**:
-  - `image_data`: Base64-encoded PNG
-  - `filename`: Output filename
-  - `folder`: Output directory
-- **Process**:
-  - Creates directory if needed
-  - Decodes base64
-  - Writes binary file
-- **Output**: PNG file on disk
+#### `get_instagram_prompt(topic) -> str`
+- **Purpose**: Generate Instagram-style prompt via Ollama or fallback
+- **Uses**: `test_ollama_connection()`, `generate_instagram_prompt_from_ollama()`
 
-#### Prompt Persistence Functions
+#### `generate_image(prompt, service, steps) -> Optional[str]`
+- **Purpose**: Generate image using the provided service
+- **Service**: Any `ImageGenerationService` implementation
+- **Returns**: Base64-encoded PNG or `None`
 
-- `load_prompts() -> Dict[str, List[str]]`: Loads `generated_prompts.json`, migrates legacy format
-- `add_prompt_to_topic(topic, prompt, prompts)`: Appends prompt to topic category
-- `save_prompts(prompts) -> bool`: Writes prompts to JSON file
+#### `save_image(image_data, filename, folder) -> None`
+- **Purpose**: Save decoded PNG to disk
+- **Process**: Base64 decode → write file
 
-### 2. External Services
+#### `main()`
+- **Purpose**: Orchestrates the complete workflow
+- **Flow**: Parse args → create service → generate prompt → generate image → save
+
+### 2. Prompt Service
+
+**Functions:**
+- `test_ollama_connection()` — Tests Ollama availability
+- `generate_instagram_prompt_from_ollama(topic)` — Requests prompt from LLM
+- `_generate_fallback_instagram_prompt(topic)` — Built-in template
+- `get_instagram_prompt(topic)` — Main entry point with fallback
+
+### 3. Image Generation Services
+
+#### LocalStableDiffusionService
+- POSTs to `/sdapi/v1/txt2img`
+- Request: `{"prompt": str, "steps": int}`
+- Response: `{"images": ["base64_data"]}`
+- Timeout: 120 seconds
+
+#### ModelsLabOnlineService
+- POSTs to `https://modelslab.com/api/v6/images/text2img`
+- Request: `{"key": str, "model_id": str, "prompt": str, "negative_prompt": str, ...}`
+- Response: `{"status": "success", "images": ["base64_data"]}`
+- Timeout: 120 seconds
+- Steps clamped to 1-50
+
+### 4. External Services
 
 #### Ollama (Port 11434)
 - **Purpose**: LLM-powered prompt generation
 - **Model**: `llama2-uncensored:7b`
 - **API**: `POST /api/generate`
-- **Timeout**: 120 seconds
-- **Fallback**: Built-in Instagram prompt template
+- **Timeout**: 10s (test), 120s (generation)
+- **Status**: Required for creative prompts (fallback available)
 
 #### Stable Diffusion Web UI (Port 7860)
-- **Purpose**: AI image synthesis
+- **Purpose**: Local image generation
 - **Endpoint**: `POST /sdapi/v1/txt2img`
 - **Timeout**: 120 seconds
-- **Fallback**: None (fails gracefully with error message)
+- **Status**: Required for local mode
+
+#### ModelsLab API
+- **Purpose**: Cloud-based image generation
+- **Endpoint**: `POST https://modelslab.com/api/v6/images/text2img`
+- **Timeout**: 120 seconds
+- **Status**: Required for online mode
+- **Auth**: Free API key
 
 ## Data Flow
 
+### Local Mode
 ```
 User Input
     │
     ▼
-[CLI Layer] ──→ validate & parse
+[CLI Layer] ──→ parse & validate
+    │
+    ▼
+[Service Selection] ──→ LocalStableDiffusionService
     │
     ▼
 [Prompt Generation] ──┐
-    │ (Ollama API)     │
-    ▼                   │ (if fails)
-[Generated Prompt] ◄───┘
+    │                  │
+    ▼                  │
+[Ollama API] ──┐      │
+    │          │      │
+    ▼          │      │
+[Generated Prompt] <──┘ (fallback if fail)
     │
     ▼
-[Image Generation] ─────┐
-    │ (SD WebUI API)     │
-    ▼                    │ (if fails)
-[Base64 Image] ◄─────────┘
+[Image Generation] ───→ Local SD Web UI
+    │
+    ▼
+[Base64 Image]
     │
     ▼
 [Output Manager] ──→ decode → save PNG
     │
     ▼
-[Prompt Persistence] ──→ update JSON
+[Result]
+```
+
+### Online Mode
+```
+User Input
     │
     ▼
-Success / Error
+[CLI Layer] ──→ parse & validate
+    │
+    ▼
+[Service Selection] ──→ ModelsLabOnlineService
+    │                    (verify API key)
+    ▼
+[Prompt Generation] ──┐
+    │                  │
+    ▼                  │
+[Ollama API] ──┐      │
+    │          │      │
+    ▼          │      │
+[Generated Prompt] <──┘ (fallback if fail)
+    │
+    ▼
+[Image Generation] ───→ ModelsLab API
+    │
+    ▼
+[Base64 Image]
+    │
+    ▼
+[Output Manager] ──→ decode → save PNG
+    │
+    ▼
+[Result]
 ```
 
 ## Error Handling
 
-| Error Condition | Handling Strategy | User Feedback |
-|----------------|-------------------|---------------|
-| Empty topic | Early validation, exit(1) | "Error: Topic cannot be empty" |
-| Ollama unavailable | Fallback prompt generation | "Using fallback Instagram prompt" |
-| Ollama API error | Fallback prompt generation | "Error connecting to Ollama" |
-| SD WebUI unavailable | Graceful failure, exit(1) | "Request to stable diffusion API failed" |
-| Invalid API response | Graceful handling with error | "Unexpected response format" |
-| File I/O errors | Return error code (save_prompts) | "Error saving prompts file" |
+| Error | Local Mode | Online Mode | User Feedback |
+|-------|-----------|-------------|---------------|
+| Empty topic | Exit(1) | Exit(1) | "Error: Topic cannot be empty" |
+| Ollama unavailable | Fallback prompt | Fallback prompt | "Using fallback Instagram prompt" |
+| SD WebUI unavailable | Exit(1) | N/A | "Failed: local service" + suggest online |
+| Invalid API key | N/A | Exit(1) | "Error: Invalid API key" |
+| Rate limited | N/A | Exit(1) | "Error: Rate limited" |
+| No internet | OK | Exit(1) | "Could not connect" + suggest offline |
+| Image decode fail | Exit(1) | Exit(1) | "Failed to save image" |
 
 ## Configuration
 
@@ -206,20 +327,29 @@ Success / Error
 |----------|------|---------|-------------|
 | `topic` | string | required | Photo subject/theme |
 | `-o, --output` | string | `generated_images` | Output directory |
-| `-s, --steps` | int | 20 | Diffusion steps (1-100) |
+| `-s, --steps` | int | 20 | Diffusion steps |
+| `--online` | flag | False | Use online service |
+| `--api-key` | string | None | ModelsLab API key |
+| `--service` | string | `local` | Service type (`local`/`modelslab`) |
 
-### API Endpoints
+### Environment Variables
 
-| Service | URL | Purpose |
-|---------|-----|---------|
-| Ollama | `http://127.0.0.1:11434` | LLM prompt generation |
-| Stable Diffusion | `http://127.0.0.1:7860` | Image synthesis |
+| Variable | Purpose | Example |
+|----------|---------|----------|
+| `SD_API_KEY` | ModelsLab API key | `export SD_API_KEY='abc123...'` |
+| `SD_SERVICE` | Default service | `export SD_SERVICE='modelslab'` |
+
+### Files
+
+- `config.json` — Optional: `{"api_key": "your_key"}`
+- `generated_prompts.json` — Auto-generated prompt cache
+- `.gitignore` — Excludes generated files and configs
 
 ## File Structure
 
 ```
 39-ImageGenerator/
-├── app.py                      # Main CLI application
+├── app.py                      # Main CLI application (703 lines)
 ├── PROMPT_Instructions.md      # Prompt engineering guides
 ├── ARCHITECTURE.md             # This file
 ├── RULES_coding.md             # Coding standards
@@ -227,37 +357,46 @@ Success / Error
 ├── generated_images/           # Output directory (gitignored)
 │   └── instagram_<topic>.png   # Generated images
 ├── generated_prompts.json      # Saved prompts (gitignored)
-├── .gitignore                   # Git ignore rules
-└── requirements.txt            # Dependencies (optional)
+├── config.json                 # Optional API key config (gitignored)
+└── .gitignore                   # Git ignore rules
 ```
 
 ## Dependencies
 
-| Package | Purpose | Required |
-|---------|---------|----------|
-| `requests` | HTTP client for API calls | Yes |
-| Python 3.8+ | Runtime environment | Yes |
-| Ollama | LLM service | External |
-| Stable Diffusion | Image generation | External |
+| Package | Purpose | Required | Version |
+|---------|---------|----------|---------|
+| `requests` | HTTP client | Yes | 2.33+ |
+| Python | Runtime | Yes | 3.8+ |
+| Ollama | Prompt generation | External | Any |
+| SD WebUI | Local generation | Optional | Any |
+| ModelsLab API | Online generation | Optional | Free tier |
 
 ## Security Considerations
 
-- **Local-only**: All API calls are to localhost (127.0.0.1)
-- **No external network**: No internet access required
-- **No secrets**: No authentication tokens needed
-- **Sanitized filenames**: User input sanitized before file operations
-- **No sensitive data**: No credentials or keys stored
+### Local Mode
+- ✅ All API calls to localhost
+- ✅ No external network traffic
+- ✅ No sensitive data transmitted
+- ✅ No API keys needed
+- ✅ Fully offline capable
+
+### Online Mode
+- ⚠️ Prompts sent to third-party API
+- ⚠️ Requires API key (store securely)
+- ⚠️ Internet connection required
+- ⚠️ Subject to provider's privacy policy
+- ⚠️ Potential rate limits
+
+### Security Practices
+- API keys not logged or persisted to prompts file
+- Filenames sanitized to prevent path traversal
+- HTTPS for all external API calls
+- Timeout protection on all requests
+- Input validation at all boundaries
 
 ## Future Enhancements
 
 See [ARCHITECTURE.md](ARCHITECTURE.md#future-enhancements) for details.
-
-1. **Batch generation**: Process multiple topics in one run
-2. **Prompt templates**: Customizable prompt structures
-3. **Negative prompts**: SD WebUI negative prompt support
-4. **Image preview**: Display before saving
-5. **Multiple topics**: Single command for multiple subjects
-6. **Custom models**: Support different Ollama/SD models
 7. **Progress indication**: Show generation progress
 8. **Async operations**: Parallel prompt & image generation
 9. **Configuration file**: YAML/JSON config for settings

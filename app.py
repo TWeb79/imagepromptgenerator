@@ -3,23 +3,24 @@
 
 Generates Instagram-worthy photos based on user-provided topics by combining
 LLM-powered prompt generation (via Ollama) with AI image synthesis (via Stable
-Diffusion Web UI).
+Diffusion).
 
 External Dependencies:
     - Ollama running on localhost:11434 (for prompt generation)
-    - Stable Diffusion Web UI on localhost:7860 (for image generation)
+    - Stable Diffusion Web UI on localhost:7860 (for local image generation), OR
+    - ModelsLab API key (for online image generation without local installation)
 
 Usage:
     python3 app.py "coffee" [-o output_folder] [-s diffusion_steps]
+    python3 app.py "coffee" --online [--api-key KEY]
 """
 
 import argparse
 import base64
 import json
 import os
-import shutil
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Protocol
 
 import requests
 
@@ -33,6 +34,15 @@ OLLAMA_MODEL: str = "llama2-uncensored:7b"
 OLLAMA_TEST_TIMEOUT: int = 10
 OLLAMA_GENERATE_TIMEOUT: int = 120
 SD_API_TIMEOUT: int = 120
+
+# Online service configuration
+MODELSLAB_API_URL: str = "https://modelslab.com/api/v6/images/text2img"
+DEFAULT_SERVICE: str = "local"
+DEFAULT_MODEL_ID: str = "stable-diffusion-xl-1024-v1-0"
+
+# Environment variable names
+ENV_SD_API_KEY: str = "SD_API_KEY"
+ENV_SD_SERVICE: str = "SD_SERVICE"
 
 
 # ============================
@@ -120,6 +130,203 @@ def add_prompt_to_topic(
         print(f"Created new topic '{topic_key}'")
     
     return prompts
+
+
+# ============================
+# Image Generation Service
+# ============================
+
+class ImageGenerationService(Protocol):
+    """Protocol for image generation services.
+    
+    Any service that implements generate() can be used for image synthesis.
+    """
+    
+    def generate(self, prompt: str, steps: int) -> Optional[str]:
+        ...
+
+
+class LocalStableDiffusionService:
+    """Image generation using local Stable Diffusion Web UI.
+    
+    Connects to a local Stable Diffusion Web UI instance via its REST API.
+    Requires SD Web UI running on the specified URL.
+    """
+    
+    def __init__(self, url: str = SD_WEBUI_URL) -> None:
+        """Initialize local SD service.
+        
+        Args:
+            url: Base URL of the Stable Diffusion Web UI API.
+        """
+        self.url: str = url
+    
+    def generate(self, prompt: str, steps: int) -> Optional[str]:
+        """Generate image from prompt using local Stable Diffusion.
+        
+        Args:
+            prompt: The image generation prompt.
+            steps: Number of diffusion steps (1-100).
+        
+        Returns:
+            Base64-encoded PNG image data, or None on failure.
+        """
+        payload: Dict[str, str | int] = {
+            "prompt": prompt,
+            "steps": steps,
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.url}/sdapi/v1/txt2img",
+                json=payload,
+                timeout=SD_API_TIMEOUT,
+            )
+            response.raise_for_status()
+            
+            data: Dict = response.json()
+            images: List[str] = data.get("images", [])
+            
+            if not images:
+                print("No images returned from Stable Diffusion API")
+                return None
+            
+            return images[0]
+            
+        except requests.exceptions.RequestException as e:
+            print(f"Request to Stable Diffusion API failed: {e}")
+        except (KeyError, IndexError) as e:
+            print(f"Unexpected response format from API: {e}")
+        except json.JSONDecodeError as e:
+            print(f"Invalid JSON response: {e}")
+        
+        return None
+
+
+class ModelsLabOnlineService:
+    """Image generation using ModelsLab online Stable Diffusion API.
+    
+    Free online service that generates images without requiring local
+    Stable Diffusion installation. Requires a free API key from
+    https://modelslab.com/.
+    """
+    
+    def __init__(self, api_key: str, model_id: str = DEFAULT_MODEL_ID) -> None:
+        """Initialize ModelsLab online service.
+        
+        Args:
+            api_key: Free API key from ModelsLab.
+            model_id: Model to use (default: SDXL).
+        """
+        self.api_key: str = api_key
+        self.model_id: str = model_id
+    
+    def generate(self, prompt: str, steps: int) -> Optional[str]:
+        """Generate image from prompt using ModelsLab API.
+        
+        Args:
+            prompt: The image generation prompt.
+            steps: Number of diffusion steps (1-50). Maps to num_inference_steps.
+        
+        Returns:
+            Base64-encoded PNG image data, or None on failure.
+        """
+        # Clamp steps for online API (typically 1-50)
+        clamped_steps: int = max(1, min(steps, 50))
+        
+        payload: Dict[str, str | int] = {
+            "key": self.api_key,
+            "model_id": self.model_id,
+            "prompt": prompt,
+            "negative_prompt": (
+                "disfigured, deformed, ugly, bad anatomy, blurry, low quality, "
+                "cartoon, anime, 3d, painting, watermark, text"
+            ),
+            "width": "768",
+            "height": "768",
+            "samples": "1",
+            "num_inference_steps": str(clamped_steps),
+            "safety_checker": "no",
+            "enhance_prompt": "yes",
+        }
+        
+        try:
+            response = requests.post(
+                MODELSLAB_API_URL,
+                json=payload,
+                timeout=SD_API_TIMEOUT,
+            )
+            
+            if response.status_code == 401:
+                print("Error: Invalid API key. Please check your ModelsLab API key.")
+                return None
+            elif response.status_code == 429:
+                print("Error: Rate limited. Please wait before trying again.")
+                return None
+            elif response.status_code != 200:
+                print(f"API returned status {response.status_code}")
+                return None
+            
+            data: Dict = response.json()
+            
+            if data.get("status") != "success":
+                print(f"API error: {data.get('message', 'Unknown error')}")
+                return None
+            
+            images: List[str] = data.get("images", [])
+            
+            if not images:
+                print("No images returned from API")
+                return None
+            
+            print("(Generated via ModelsLab online service)")
+            return images[0]
+            
+        except requests.exceptions.Timeout:
+            print("Request timed out. Please try again.")
+        except requests.exceptions.ConnectionError:
+            print("Could not connect to online service. Check your internet connection.")
+        except requests.exceptions.RequestException as e:
+            print(f"Request to ModelsLab API failed: {e}")
+        except (KeyError, IndexError) as e:
+            print(f"Unexpected response format: {e}")
+        except json.JSONDecodeError as e:
+            print(f"Invalid JSON response: {e}")
+        
+        return None
+
+
+def get_api_key(cli_api_key: Optional[str]) -> Optional[str]:
+    """Get API key from CLI argument, environment, or config file.
+    
+    Priority order:
+    1. CLI argument (--api-key)
+    2. Environment variable (SD_API_KEY)
+    3. Config file (config.json)
+    
+    Args:
+        cli_api_key: API key from CLI, if provided.
+    
+    Returns:
+        API key string, or None if not found.
+    """
+    if cli_api_key:
+        return cli_api_key
+    
+    env_key = os.environ.get(ENV_SD_API_KEY)
+    if env_key:
+        return env_key
+    
+    # Try config.json
+    try:
+        if os.path.exists("config.json"):
+            with open("config.json", 'r') as f:
+                config: Dict = json.load(f)
+                return config.get("api_key")
+    except (IOError, json.JSONDecodeError):
+        pass
+    
+    return None
 
 
 # ============================
@@ -261,54 +468,59 @@ def get_instagram_prompt(topic: str) -> str:
 # ============================
 # Image Generation
 # ============================
+
+
+def create_service(
+    service_type: str,
+    api_key: Optional[str] = None,
+    url: str = SD_WEBUI_URL,
+) -> ImageGenerationService:
+    """Factory function to create an image generation service.
+    
+    Args:
+        service_type: Type of service ("local" or "modelslab").
+        api_key: API key for online services (required for modelslab).
+        url: URL for local Stable Diffusion Web UI.
+    
+    Returns:
+        An ImageGenerationService instance.
+    
+    Raises:
+        ValueError: If service_type is unknown or api_key is missing.
+    """
+    if service_type == "local":
+        return LocalStableDiffusionService(url)
+    elif service_type == "modelslab":
+        if not api_key:
+            raise ValueError(
+                "API key required for modelslab service. "
+                "Get a free key from https://modelslab.com/ "
+                "or set SD_API_KEY environment variable."
+            )
+        return ModelsLabOnlineService(api_key)
+    else:
+        raise ValueError(
+            f"Unknown service type: {service_type}. "
+            f"Choose from: local, modelslab"
+        )
+
+
 def generate_image(
     prompt: str,
-    url: str = SD_WEBUI_URL,
+    service: ImageGenerationService,
     steps: int = 20,
 ) -> Optional[str]:
-    """Generate an image from a prompt using Stable Diffusion Web UI.
-    
-    Sends the prompt to the SD Web UI txt2img endpoint and returns
-    the base64-encoded image data.
+    """Generate an image from a prompt using the given service.
     
     Args:
         prompt: The image generation prompt.
-        url: SD Web UI API endpoint URL.
-        steps: Number of diffusion steps (1-100).
+        service: Image generation service instance.
+        steps: Number of diffusion steps.
     
     Returns:
         Base64-encoded PNG image data, or None on failure.
     """
-    payload: Dict[str, str | int] = {
-        "prompt": prompt,
-        "steps": steps,
-    }
-    
-    try:
-        response = requests.post(
-            f"{url}/sdapi/v1/txt2img",
-            json=payload,
-            timeout=SD_API_TIMEOUT,
-        )
-        response.raise_for_status()
-        
-        data: Dict = response.json()
-        images: List[str] = data.get("images", [])
-        
-        if not images:
-            print("No images returned from Stable Diffusion API")
-            return None
-        
-        return images[0]
-        
-    except requests.exceptions.RequestException as e:
-        print(f"Request to Stable Diffusion API failed: {e}")
-    except (KeyError, IndexError) as e:
-        print(f"Unexpected response format from API: {e}")
-    except json.JSONDecodeError as e:
-        print(f"Invalid JSON response: {e}")
-    
-    return None
+    return service.generate(prompt, steps)
 
 
 # ============================
@@ -333,7 +545,6 @@ def save_image(image_data: str, filename: str, folder: str) -> None:
     
     os.makedirs(folder, exist_ok=True)
     filepath: str = os.path.join(folder, filename)
-    
     with open(filepath, 'wb') as f:
         f.write(base64.b64decode(image_data))
 
@@ -373,6 +584,24 @@ def parse_arguments() -> argparse.Namespace:
         default=20,
         help='Number of diffusion steps (default: 20)',
     )
+    parser.add_argument(
+        '--online',
+        action='store_true',
+        help='Use online Stable Diffusion service (requires API key).',
+    )
+    parser.add_argument(
+        '--api-key',
+        type=str,
+        default=None,
+        help='API key for online service (or set SD_API_KEY env var).',
+    )
+    parser.add_argument(
+        '--service',
+        type=str,
+        choices=['local', 'modelslab'],
+        default=os.environ.get(ENV_SD_SERVICE, DEFAULT_SERVICE),
+        help='Image generation service (default: local).',
+    )
     
     return parser.parse_args()
 
@@ -390,12 +619,40 @@ def main() -> None:
         print("Error: Topic cannot be empty")
         sys.exit(1)
     
+    # Determine service type and API key
+    service_type: str = args.service
+    api_key: Optional[str] = args.api_key
+    
+    if args.online:
+        service_type = "modelslab"
+    
+    if service_type == "modelslab" and not api_key:
+        api_key = get_api_key(None)
+        if not api_key:
+            print(
+                "Error: API key required for online service.\n"
+                "Get a free key from https://modelslab.com/\n"
+                "Then set it with:\n"
+                "  export SD_API_KEY='your_key'\n"
+                "  # or\n"
+                "  python3 app.py 'topic' --api-key your_key\n"
+            )
+            sys.exit(1)
+    
     print(f"{'=' * 60}")
     print(f"Instagram Photo Generator")
     print(f"Topic: {topic}")
     print(f"Output folder: {args.output}")
     print(f"Steps: {args.steps}")
+    print(f"Service: {service_type}")
     print(f"{'=' * 60}")
+    
+    # Create image generation service
+    try:
+        service = create_service(service_type, api_key)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
     
     # Load existing prompts (handles legacy format migration)
     prompts: Dict[str, List[str]] = load_prompts()
@@ -412,7 +669,7 @@ def main() -> None:
     
     # Generate the image
     print("Generating image...")
-    img_data: Optional[str] = generate_image(prompt, steps=args.steps)
+    img_data: Optional[str] = generate_image(prompt, service, steps=args.steps)
     
     if img_data:
         # Create safe filename from topic
@@ -429,49 +686,18 @@ def main() -> None:
             print(f"\nFailed to save image: {e}")
             sys.exit(1)
     else:
-        print("\nFailed to generate image.")
-        print("Make sure Stable Diffusion Web UI is running on port 7860")
+        if service_type == "modelslab":
+            print(
+                "\nFailed to generate image via online service.\n"
+                "To use local Stable Diffusion instead, run without --online"
+            )
+        else:
+            print(
+                "\nFailed to generate image via local service.\n"
+                "To use online service instead, run with --online"
+            )
         sys.exit(1)
 
 
 if __name__ == "__main__":
     main()
-
-    
-    print(f"=" * 60)
-    print(f"Instagram Photo Generator")
-    print(f"Topic: {topic}")
-    print(f"Output folder: {args.output}")
-    print(f"Steps: {args.steps}")
-    print(f"=" * 60)
-    
-    # Load existing prompts (handles legacy format migration)
-    prompts = load_prompts()
-    print(f"Loaded {len(prompts)} topic(s) from {PROMPTS_FILE}")
-    
-    # Generate Instagram-style prompt based on topic
-    prompt = get_instagram_prompt(topic)
-    print(f"\nGenerated Prompt:\n{prompt}\n")
-    
-    # Add prompt to topic (extends existing, doesn't overwrite)
-    prompts = add_prompt_to_topic(topic, prompt, prompts)
-    
-    # Save updated prompts
-    if save_prompts(prompts):
-        print(f"Prompts saved to {PROMPTS_FILE}")
-    
-    # Generate the image
-    print("Generating image...")
-    img_data = generate_image(prompt, steps=args.steps)
-    
-    if img_data:
-        # Create output filename from topic
-        safe_topic = "".join(c if c.isalnum() else "_" for c in topic)
-        output_filename = f"instagram_{safe_topic}.png"
-        save_image(img_data, output_filename, args.output)
-        print(f"\nImage generated successfully!")
-        print(f"Saved to: {args.output}/{output_filename}")
-    else:
-        print("\nFailed to generate image.")
-        print("Make sure Stable Diffusion Web UI is running on port 7860")
-        sys.exit(1)

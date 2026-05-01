@@ -31,8 +31,10 @@ The system consists of three main components:
 - **Python 3.8+**
 - **[Ollama](https://ollama.ai/)** running locally (port 11434)
   - Model: `llama2-uncensored:7b` (or compatible)
-- **[Stable Diffusion Web UI](https://github.com/AUTOMATIC1111/stable-diffusion-webui)** (port 7860)
-  - Ensure the API is enabled
+  - Used only for prompt generation
+- **One** of the following for image generation:
+  - **Stable Diffusion Web UI** running locally (port 7860) **OR**
+  - **ModelsLab API key** for online generation (no local installation needed)
 
 ### Python Dependencies
 
@@ -42,7 +44,9 @@ pip install requests
 
 ## Installation
 
-### Setup Ollama
+### Option 1: Local Stable Diffusion (Full Installation)
+
+#### Setup Ollama
 
 ```bash
 ollama serve
@@ -50,32 +54,65 @@ ollama serve
 ollama run llama2-uncensored
 ```
 
-### Setup Stable Diffusion Web UI
+#### Setup Stable Diffusion Web UI
 
 Follow the official guide: https://github.com/AUTOMATIC1111/stable-diffusion-webui
 
 Ensure it's running with API enabled on port 7860.
 
-### Clone and Run
+Then install the Python dependency:
 
 ```bash
-git clone <repository-url>
-cd 39-ImageGenerator
 pip install requests
 ```
 
+### Option 2: Online Stable Diffusion (Quick Start)
+
+No local installation required! Just get a free API key.
+
+1. **Get a free ModelsLab API key**:
+   - Visit: https://modelslab.com/
+   - Sign up for a free account
+   - Get your API key from the dashboard
+
+2. **Set the API key** (choose one method):
+
+   ```bash
+   # Method 1: Environment variable (recommended)
+   export SD_API_KEY='your_api_key_here'
+   
+   # Method 2: Pass via command line
+   python3 app.py "coffee" --online --api-key your_api_key_here
+   
+   # Method 3: Create config.json
+   echo '{"api_key": "your_api_key_here"}' > config.json
+   ```
+
+3. **Install Python dependency**:
+
+   ```bash
+   pip install requests
+   ```
+
 ## Usage
 
-### Basic Usage
+### Local Mode (Default)
+
+Uses local Stable Diffusion Web UI on port 7860:
 
 ```bash
 python3 app.py "coffee"
 ```
 
-This will:
-1. Generate an Instagram-style prompt for the topic
-2. Create an image using Stable Diffusion
-3. Save the image to `generated_images/instagram_coffee.png`
+### Online Mode (No Local Installation)
+
+Uses ModelsLab cloud API:
+
+```bash
+python3 app.py "coffee" --online
+```
+
+If you've set the `SD_API_KEY` environment variable, it will be used automatically.
 
 ### Command Line Options
 
@@ -86,93 +123,130 @@ positional arguments:
 optional arguments:
   -h, --help            Show help message
   -o, --output FOLDER   Output folder (default: generated_images)
-  -s, --steps STEPS     Diffusion steps (default: 20, range: 1-100)
+  -s, --steps STEPS     Diffusion steps (default: 20)
+  --online              Use online Stable Diffusion (ModelsLab)
+  --api-key KEY         ModelsLab API key (or set SD_API_KEY env var)
+  --service {local,modelslab}
+                        Generation service (default: local)
 ```
 
 ### Examples
 
+#### Local Mode
+
 ```bash
-# Coffee/lifestyle photo
+# Basic usage
 python3 app.py "coffee"
 
 # Custom output folder
-python3 app.py "coffee" -o my_photos
+python3 app.py "travel" -o my_photos
 
-# Higher quality (more diffusion steps)
-python3 app.py "travel" -s 30
+# More diffusion steps for higher quality
+python3 app.py "fitness" -s 30
+```
 
-# Various topics
-python3 app.py "fitness"
-python3 app.py "food"
-python3 app.py "fashion"
+#### Online Mode
+
+```bash
+# Using environment variable (recommended)
+export SD_API_KEY='your_key_here'
+python3 app.py "coffee" --online
+
+# Passing API key directly
+python3 app.py "travel" --online --api-key your_key_here
+
+# With custom settings
+python3 app.py "food" --online -o my_online_images -s 30
+```
+
+#### Switching Between Modes
+
+```bash
+# If local SD WebUI is running
+python3 app.py "fashion"                    # Uses local
+
+# If local installation is not available
+python3 app.py "fashion" --online           # Uses online
+
+# Explicitly choose
+python3 app.py "fitness" --service local    # Force local
+python3 app.py "fitness" --service modelslab  # Force online
 ```
 
 ## How It Works
 
-1. **Topic Processing**: CLI parses the topic and options
-2. **Prompt Generation**: 
-   - Tests Ollama connectivity
-   - Prompts LLM to create an Instagram-style description
-   - Falls back to built-in template if Ollama is unavailable
-3. **Image Generation**: 
-   - Sends prompt to Stable Diffusion Web UI
-   - Waits for image synthesis
-   - Receives base64-encoded PNG
-4. **Output**: 
-   - Decodes base64 image
-   - Saves as PNG in specified output folder
-   - Stores prompt in `generated_prompts.json`
+### Architecture (See ARCHITECTURE.md)
 
-## Project Structure
+The application supports two image generation backends:
+
+1. **Local Stable Diffusion Web UI**
+   - Runs on localhost:7860
+   - Requires full SD installation
+   - Free (aside from compute resources)
+   - No network calls outside localhost
+   - Best for frequent use with powerful GPU
+
+2. **ModelsLab Online API**
+   - Cloud-based Stable Diffusion XL
+   - No local installation required
+   - Free API key from ModelsLab
+   - Requires internet connection
+   - Best for quick testing or machines without GPU
+
+### Workflow
 
 ```
-39-ImageGenerator/
-├── app.py                      # Main application (CLI orchestration)
-├── PROMPT_Instructions.md      # Prompt engineering guidelines
-├── ARCHITECTURE.md             # System architecture documentation
-├── RULES_coding.md             # Coding standards and best practices
-├── README.md                   # This file
-├── generated_images/           # Output directory (gitignored)
-│   └── instagram_*.png        # Generated images
-├── generated_prompts.json      # Saved prompts by topic (gitignored)
-├── .gitignore                   # Git ignore rules
-└── requirements.txt            # Python dependencies (optional)
+User Input → CLI Parsing → Service Selection
+    │
+    ├─[Local Mode]→ Ollama (prompt) → SD WebUI (image)
+    │
+    └─[Online Mode]→ Ollama (prompt) → ModelsLab API (image)
+                            │
+                            └─[Fallback]→ Built-in template
+    │
+    └─→ Output: PNG image + saved prompt (JSON)
 ```
 
-## Prompt Generation
+### Prompt Generation
 
-The tool uses specialized Instagram-style prompt generation guidelines from `PROMPT_Instructions.md`. Generated prompts include:
+Both modes use the same prompt generation process:
 
-- **Smartphone/iPhone aesthetic** — Mobile photography style
-- **Warm color tones** — Signature Instagram look
-- **Shallow depth of field** — Professional bokeh effect
-- **Lifestyle context** — Relatable, candid moments
-- **Golden hour lighting** — Warm, inviting atmosphere
+1. Tests Ollama connectivity
+2. Requests Instagram-style prompt from LLM
+3. Falls back to built-in template if Ollama unavailable
+4. Uses the prompt for image generation
 
-### Example Generated Prompt
-
-For topic "coffee":
-```
-artisan latte with heart foam art on rustic wooden table, cozy coffee shop with warm golden hour light streaming through window, exposed brick wall background, smartphone photography, iPhone 15 Pro Max, shallow depth of field, warm color tones, lifestyle photography, Instagram-worthy, highly detailed foam art, steam rising, morning vibes, 8K UHD
-```
+**Both local and online modes produce the same high-quality prompts!**
 
 ## Configuration
 
 ### Environment Variables
 
-The application uses local defaults. No environment variables are **required**, but you may override:
-
-- `OLLAMA_URL`: Override Ollama endpoint (default: `http://127.0.0.1:11434`)
-- `SD_WEBUI_URL`: Override Stable Diffusion endpoint (default: `http://127.0.0.1:7860`)
+| Variable | Purpose | Example |
+|----------|---------|----------|
+| `SD_API_KEY` | ModelsLab API key | `export SD_API_KEY='abc123...'` |
+| `SD_SERVICE` | Default service (`local`/`modelslab`) | `export SD_SERVICE='modelslab'` |
 
 ### Files
 
-- `generated_prompts.json` — Saved prompts organized by topic (automatically managed)
-- `config.json` — Optional custom configuration (gitignored)
+- `generated_prompts.json` — Saved prompts by topic (auto-generated)
+- `config.json` — Optional: `{"api_key": "your_key"}`
+
+## Local vs Online Comparison
+
+| Feature | Local Mode | Online Mode |
+|---------|-----------|-------------|
+| **Installation** | Requires SD WebUI | No installation |
+| **Speed** | Depends on GPU (typically fast) | Network dependent (~10-30s) |
+| **Cost** | Free (compute only) | Free (ModelsLab) |
+| **Privacy** | 100% local | Prompts sent to API |
+| **Offline** | ✓ Yes | ✗ No |
+| **Rate Limits** | None | Yes (check provider) |
+| **Best For** | Frequent use, powerful GPU | Quick testing, no GPU |
 
 ## Troubleshooting
 
-### Ollama Connection Error
+### Ollama Connection Error (Both Modes)
 
 ```bash
 Error connecting to Ollama: Connection refused
@@ -181,30 +255,41 @@ Error connecting to Ollama: Connection refused
 **Solution:**
 ```bash
 ollama serve
+curl http://127.0.0.1:11434/api/tags  # Verify
 ```
 
-Verify accessibility:
-```bash
-curl http://127.0.0.1:11434/api/tags
-```
-
-### Stable Diffusion Connection Error
+### Local Mode: Stable Diffusion Connection Error
 
 ```bash
 Request to stable diffusion API failed: Connection refused
 ```
 
 **Solution:**
-1. Ensure Stable Diffusion Web UI is running
-2. Verify the API is enabled (check Web UI settings)
-3. Confirm it's on port 7860
+1. Ensure SD Web UI is running on port 7860
+2. Check API is enabled in Web UI settings
+3. Try: `python3 app.py topic --online` instead
 
-### Empty/Blank Images
+### Online Mode: API Key Error
 
-If generated images are blank or corrupted:
-- Try increasing diffusion steps: `-s 30`
-- Check if the prompt is valid (too short or malformed)
-- Ensure Stable Diffusion model is properly loaded
+```bash
+Error: API key required for online service
+```
+
+**Solution:**
+1. Get free key from https://modelslab.com/
+2. Set it: `export SD_API_KEY='your_key'`
+3. Or use: `python3 app.py topic --online --api-key your_key`
+
+### Online Mode: Rate Limited
+
+```bash
+Error: Rate limited. Please wait before trying again.
+```
+
+**Solution:**
+- Wait a few minutes
+- Switch to local mode if available
+- Check provider's rate limits
 
 ### Missing Dependencies
 
@@ -212,87 +297,89 @@ If generated images are blank or corrupted:
 pip install requests
 ```
 
+## Switching Between Modes
+
+### If Local Installation Fails
+
+```bash
+# Try online mode instead
+python3 app.py "coffee" --online
+```
+
+### If You Want to Go Local
+
+1. Install Stable Diffusion Web UI
+2. Start it on port 7860
+3. Run without `--online` flag
+
+### Best Practice
+
+```bash
+# Set your preferred default in environment
+export SD_SERVICE='modelslab'  # or 'local'
+
+# Then just run normally
+python3 app.py "coffee"
+```
+
 ## Development
 
-### Coding Standards
+See [RULES_coding.md](RULES_coding.md) for coding standards.
 
-Follow the guidelines in [RULES_coding.md](RULES_coding.md).
-
-Key practices:
-- Type hints for all function signatures
-- Google-style docstrings
-- Maximum 100 character line length
-- Functions should be 20 lines or less (when practical)
-- Use specific exception types, not bare `except:`
-
-### Running Tests
-
-If tests exist:
-```bash
-python3 -m pytest tests/ -v
-```
-
-### Linting
+### Testing Both Modes
 
 ```bash
-ruff check app.py
-black app.py --check
-mypy app.py
-```
+# Quick test (1 step)
+python3 app.py "test" -s 1 --online
 
-### Manual Testing
-
-```bash
-# Quick test
-python3 app.py "test" -s 1  # Use 1 step for fast testing
+# Local test
+python3 app.py "test" -s 1 --service local
 ```
 
 ## API Reference
 
-### Ollama API
+### ModelsLab Online API
 
-- **Endpoint**: `POST http://127.0.0.1:11434/api/generate`
-- **Model**: `llama2-uncensored:7b`
-- **Timeout**: 120 seconds
+- **Endpoint**: `POST https://modelslab.com/api/v6/images/text2img`
+- **Auth**: API key (free from https://modelslab.com/)
+- **Format**: JSON with prompt, steps, dimensions
+- **Response**: Base64-encoded PNG (same format as local SD)
 
-### Stable Diffusion API
+### Local Stable Diffusion API
 
 - **Endpoint**: `POST http://127.0.0.1:7860/sdapi/v1/txt2img`
-- **Method**: POST
-- **Request**: JSON with `prompt` (string) and `steps` (int)
-- **Response**: JSON with `images` array (base64-encoded PNGs)
+- **Auth**: None (local only)
+- **Format**: JSON with prompt, steps
+- **Response**: Base64-encoded PNG
 
-## Limitations
+## Architecture
 
-- Requires local Ollama and Stable Diffusion Web UI instances
-- No batch generation (one topic per run)
-- No custom negative prompts
-- No model selection (uses default SD model)
-- Images may vary in quality based on topic and prompt
+See [ARCHITECTURE.md](ARCHITECTURE.md) for:
+- System diagrams
+- Component details
+- Data flow
+- Error handling
 
 ## Future Enhancements
 
-See [ARCHITECTURE.md](ARCHITECTURE.md#future-enhancements) for planned features.
-
-## Contributing
-
-1. Follow the coding standards in `RULES_coding.md`
-2. Add tests for new functionality
-3. Update documentation as needed
-4. Ensure all linting passes
-
-## Troubleshooting Checklist
-
-- [ ] Ollama is running: `ollama serve`
-- [ ] Stable Diffusion Web UI is running on port 7860
-- [ ] Python dependencies installed: `pip install requests`
-- [ ] Topic is not empty
-- [ ] Output folder is writable
-- [ ] Sufficient disk space for generated images
+See [ARCHITECTURE.md](ARCHITECTURE.md#future-enhancements) for planned features including:
+- Additional online providers (HuggingFace, Replicate)
+- Batch generation
+- Custom negative prompts
+- Model selection
 
 ## License
 
 MIT License
+
+## Support
+
+For issues:
+1. Check troubleshooting section above
+2. Verify your service (local vs online)
+3. Check that Ollama is running (for prompt generation)
+4. For online mode, verify your API key
+5. Review [ARCHITECTURE.md](ARCHITECTURE.md) for system details
 
 ## Support
 
